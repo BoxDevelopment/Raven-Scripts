@@ -1,5 +1,10 @@
 String colorSymbol = util.colorSymbol;
 
+int status = -1;
+String myName = "";
+String myTeamColor = "";
+long lastStatusCheck = 0;
+
 void onLoad() {
     modules.registerDescription(scriptName);
     modules.registerSlider("Range", "blocks", 100, 0, 500, 5);
@@ -11,12 +16,78 @@ void onLoad() {
     modules.registerButton("Show Bots", false);
     modules.registerButton("Show Distance", true);
     modules.registerSlider("Distance Text Scale", "", 0.8, 0.5, 1.5, 0.05);
+    modules.registerButton("Ignore Teammates", true);
+    modules.registerButton("Lobby Check", true);
+}
+
+void onEnable() {
+    myName = client.getPlayer().getName();
+}
+
+void onPreUpdate() {
+    long now = client.time();
+    if (now - lastStatusCheck > 1000) {
+        status = getBedwarsStatus();  
+        if (status == 3) {
+            refreshTeams();           
+        }
+        lastStatusCheck = now;
+    }
+}
+// thanks des
+void refreshTeams() {
+    if (status != 3 || client.allowFlying()) return;
+    
+    String[] colorKeys = {"c", "9", "a", "e", "b", "f", "d", "8"};
+    List<NetworkPlayer> networkPlayers = world.getNetworkPlayers();
+    for (NetworkPlayer player : networkPlayers) {
+        if (!player.getName().equals(myName)) continue;
+        
+        for (String color : colorKeys) {
+            if (player.getDisplayName().startsWith(util.color("&" + color))) {
+                myTeamColor = color;
+                break;
+            }
+        }
+    }
+}
+
+int getBedwarsStatus() {
+    List<String> sidebar = world.getScoreboard();
+    if (sidebar == null) {
+        if (world.getDimension().equals("The End")) {
+            return 0;
+        }
+        return -1;
+    }
+    
+    int size = sidebar.size();
+    if (size < 7) return -1;
+    
+    if (!util.strip(sidebar.get(0)).startsWith("BED WARS")) {
+        return -1;
+    }
+    
+    if (util.strip(sidebar.get(5)).startsWith("R Red:") && 
+        util.strip(sidebar.get(6)).startsWith("B Blue:")) {
+        return 3;
+    }
+    
+    String six = util.strip(sidebar.get(6));
+    if (six.equals("Waiting...") || six.startsWith("Starting in")) {
+        return 2;
+    }
+    
+    return -1;
 }
 
 void onRenderTick(float partialTicks) {
     if (client.getScreen() != null && !client.getScreen().isEmpty()) return;
+    if (modules.getButton(scriptName, "Lobby Check") && status != 3) return;
     Entity player = client.getPlayer();
     if (player == null) return;
+
+    boolean ignoreTeammates = modules.getButton(scriptName, "Ignore Teammates");
 
     double rng = modules.getSlider(scriptName, "Range");
     double radiusInput = modules.getSlider(scriptName, "Radius");
@@ -32,11 +103,26 @@ void onRenderTick(float partialTicks) {
     int[] resSize = client.getDisplaySize();
     double baseX = resSize[0] / 2.0;
     double baseY = resSize[1] / 2.0;
+    int guiScale = resSize[2];
 
     Vec3 playerPos = player.getPosition();
 
     for (Entity en : world.getPlayerEntities()) {
         if (en == player || en.isDead() || en.getHealth() <= 0) continue;
+
+        if (ignoreTeammates && status == 3 && myTeamColor != null) {
+            String entColor = null;
+            String display = en.getDisplayName();
+            if (display != null && display.startsWith(util.color("&"))) {
+                for (String c : new String[]{"c", "9", "a", "e", "b", "f", "d", "8"}) {
+                    if (display.startsWith(util.color("&" + c))) {
+                        entColor = c;
+                        break;
+                    }
+                }
+            }
+            if (entColor != null && entColor.equals(myTeamColor)) continue;
+        }
 
         if (!showBots) {
             NetworkPlayer net = en.getNetworkPlayer();
@@ -57,7 +143,7 @@ void onRenderTick(float partialTicks) {
         double y = lastPos.y + (targetPos.y - lastPos.y) * partialTicks + (en.getEyeHeight() / 2);
         double z = lastPos.z + (targetPos.z - lastPos.z) * partialTicks;
 
-        Vec3 vec = render.worldToScreen(x, y, z, 2, partialTicks);
+        Vec3 vec = render.worldToScreen(x, y, z, guiScale, partialTicks);
         if (vec == null) continue;
 
         double dx = vec.x - baseX;
@@ -72,9 +158,7 @@ void onRenderTick(float partialTicks) {
         double angleRotation = Math.atan2(dy, dx) * (180.0 / Math.PI) + 90.0;
         double hypotenuse = Math.hypot(dx, dy);
 
-        if (inFrustum && hypotenuse < radiusInput + 10.0) {
-            continue;
-        }
+        if (inFrustum && hypotenuse < radiusInput + 10.0) continue;
 
         double renderX = baseX + radiusInput * Math.sin(anglePosition);
         double renderY = baseY + radiusInput * Math.cos(anglePosition);
