@@ -1,6 +1,9 @@
 String colorSymbol = util.colorSymbol;
 int status = -1;
 long lastStatusCheck = 0;
+Map<Integer, Integer> botFirstSeenTicks = new HashMap<>();
+Map<Integer, Boolean> botEverMovedHoriz = new HashMap<>();
+Map<Integer, Boolean> botAlwaysInvisible = new HashMap<>();
 
 void onLoad() {
     modules.registerSlider("Mode", "", 0, 0, 1, 1);
@@ -20,6 +23,26 @@ void onLoad() {
     modules.registerButton("Ignore Bots", true);
     modules.registerButton("Lobby Check", true);
     modules.registerSlider("Range", "blocks", 100, 10, 500, 10);
+    modules.registerButton("Bot Check: Invalid UUID", true);
+    modules.registerButton("Bot Check: UUID Stationary Only", true);
+    modules.registerButton("Bot Check: Always Invisible", true);
+    modules.registerButton("Bot Check: Always Stationary", true);
+    modules.registerButton("Bot Check: Entity Age", true);
+    modules.registerSlider("Bot Min Age", "ticks", 20, 0, 200, 1);
+}
+
+void onEnable() {
+    clearBotTracking();
+}
+
+void onDisable() {
+    clearBotTracking();
+}
+
+void clearBotTracking() {
+    botFirstSeenTicks.clear();
+    botEverMovedHoriz.clear();
+    botAlwaysInvisible.clear();
 }
 
 void onPreUpdate() {
@@ -69,6 +92,12 @@ void onRenderTick(float partialTicks) {
     boolean ignoreBots = modules.getButton(scriptName, "Ignore Bots");
     boolean filled = modules.getButton(scriptName, "Filled");
     double range = modules.getSlider(scriptName, "Range");
+    boolean checkInvalidUUID = modules.getButton(scriptName, "Bot Check: Invalid UUID");
+    boolean invalidUUIDStationaryOnly = modules.getButton(scriptName, "Bot Check: UUID Stationary Only");
+    boolean checkAlwaysInvisible = modules.getButton(scriptName, "Bot Check: Always Invisible");
+    boolean checkAlwaysStationary = modules.getButton(scriptName, "Bot Check: Always Stationary");
+    boolean checkEntityAge = modules.getButton(scriptName, "Bot Check: Entity Age");
+    int minEntityAge = (int) modules.getSlider(scriptName, "Bot Min Age");
 
     int ra = (int) modules.getSlider(scriptName, "Box Alpha");
     int rr = (int) modules.getSlider(scriptName, "Box R");
@@ -88,16 +117,15 @@ void onRenderTick(float partialTicks) {
     int healthColor = (255 << 24) | (hr << 16) | (hg << 8) | hb;
 
     int scale = client.getDisplaySize()[2];
+    HashSet<Integer> activeIds = new HashSet<>();
 
     for (Entity e : world.getPlayerEntities()) {
         if (e == player || e.isDead() || e.getHealth() <= 0) continue;
+        activeIds.add(e.entityId);
         if (player.getPosition().distanceTo(e.getPosition()) > range) continue;
 
         if (ignoreBots) {
-            if (e.getNetworkPlayer() == null) continue;
-            String name = e.getName();
-            if (name == null) continue;
-            if (name.indexOf(colorSymbol) != -1 || name.equalsIgnoreCase("bot") || name.equalsIgnoreCase("npc") || name.length() <= 2) continue;
+            if (isBotEntity(e, checkInvalidUUID, invalidUUIDStationaryOnly, checkAlwaysInvisible, checkAlwaysStationary, checkEntityAge, minEntityAge)) continue;
         }
 
         Vec3 last = e.getLastPosition();
@@ -150,6 +178,85 @@ void onRenderTick(float partialTicks) {
             double pct = e.getHealth() / e.getMaxHealth();
             double barH = (by2 - by1) * pct;
             render.rect((float)(bx1 - 3), (float)(by2 - barH), (float)(bx1 - 1), (float)by2, healthColor);
+        }
+    }
+
+    pruneBotTracking(activeIds);
+}
+
+boolean isBotEntity(Entity entity, boolean checkInvalidUUID, boolean invalidUUIDStationaryOnly, boolean checkAlwaysInvisible, boolean checkAlwaysStationary, boolean checkEntityAge, int minEntityAge) {
+    updateBotState(entity);
+
+    int id = entity.entityId;
+    boolean stationary = !botEverMovedHoriz.getOrDefault(id, false);
+    boolean alwaysInvisible = botAlwaysInvisible.getOrDefault(id, false);
+    int age = Math.max(0, entity.getTicksExisted() - botFirstSeenTicks.getOrDefault(id, entity.getTicksExisted()));
+
+    if (checkInvalidUUID) {
+        String uuid = getEntityUUID(entity);
+        boolean invalidUUID = !isValidUUID(uuid);
+        if (invalidUUID && (!invalidUUIDStationaryOnly || stationary)) {
+            return true;
+        }
+    }
+
+    if (checkAlwaysInvisible && alwaysInvisible) return true;
+    if (checkAlwaysStationary && stationary) return true;
+    if (checkEntityAge && age < minEntityAge) return true;
+
+    return false;
+}
+
+void updateBotState(Entity entity) {
+    int id = entity.entityId;
+    if (!botFirstSeenTicks.containsKey(id)) {
+        botFirstSeenTicks.put(id, entity.getTicksExisted());
+        botEverMovedHoriz.put(id, false);
+        botAlwaysInvisible.put(id, entity.isInvisible());
+    } else {
+        boolean wasAlwaysInvisible = botAlwaysInvisible.getOrDefault(id, true);
+        if (wasAlwaysInvisible && !entity.isInvisible()) {
+            botAlwaysInvisible.put(id, false);
+        }
+    }
+
+    Vec3 last = entity.getLastPosition();
+    Vec3 cur = entity.getPosition();
+    if (last != null && cur != null) {
+        double dx = cur.x - last.x;
+        double dz = cur.z - last.z;
+        if (dx * dx + dz * dz > 0.0001) {
+            botEverMovedHoriz.put(id, true);
+        }
+    }
+}
+
+String getEntityUUID(Entity entity) {
+    String uuid = entity.getUUID();
+    if (uuid != null && !uuid.isEmpty()) return uuid;
+
+    NetworkPlayer net = entity.getNetworkPlayer();
+    if (net != null) {
+        String netUUID = net.getUUID();
+        if (netUUID != null && !netUUID.isEmpty()) return netUUID;
+    }
+
+    return null;
+}
+
+boolean isValidUUID(String uuid) {
+    if (uuid == null || uuid.isEmpty()) return false;
+    return uuid.matches("^[0-9a-fA-F]{32}$") || uuid.matches("^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$");
+}
+
+void pruneBotTracking(HashSet<Integer> activeIds) {
+    for (Iterator<Map.Entry<Integer, Integer>> it = botFirstSeenTicks.entrySet().iterator(); it.hasNext();) {
+        Map.Entry<Integer, Integer> entry = it.next();
+        int id = entry.getKey();
+        if (!activeIds.contains(id)) {
+            it.remove();
+            botEverMovedHoriz.remove(id);
+            botAlwaysInvisible.remove(id);
         }
     }
 }
