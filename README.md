@@ -44,3 +44,9 @@ skid all you want idc
 
 - **thud2**  
   Replacement for b4 thud when it broke and caused crashes
+- **safewalktoggle**
+  Toggles on scaffold mode on safewalk when toggled
+
+
+dont be afraid to use ai:
+“If I have seen further, it is by standing on the shoulders of giants.” -Isaac Newton
