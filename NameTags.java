@@ -10,7 +10,7 @@ void onLoad() {
     modules.registerButton("Background", true);
     modules.registerSlider("Background Opacity", "", 120, 0, 255, 1);
     modules.registerButton("Background Border", false);
-    modules.registerButton("Clamp to sides", true);
+    modules.registerButton("Clamp to sides", false);
     modules.registerButton("Only render name", false);
     modules.registerButton("Text Shadow", false);
 
