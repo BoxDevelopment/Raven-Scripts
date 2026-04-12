@@ -48,5 +48,12 @@ skid all you want idc
   Toggles on scaffold mode on safewalk when toggled
 
 
+
+## Ideas / Todo 
+
+- add sneak check to nametags
+- killfeed script? like in cs (sc6the)
+- multiple targethud's for multiple targets ? (sp3ce)
+  
 dont be afraid to use ai:
 “If I have seen further, it is by standing on the shoulders of giants.” -Isaac Newton
