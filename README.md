@@ -44,8 +44,15 @@ skid all you want idc
 
 - **thud2**  
   Replacement for b4 thud when it broke and caused crashes
+  
 - **safewalktoggle**
   Toggles on scaffold mode on safewalk when toggled
+  
+- **AntiBot**
+  A library that can be loaded in using a load script to implement basic antibot checks (though i just realised i should prob just use bridges...)
+
+- **Detect**
+  example usage of the AntiBot library script (that should be a bridge)
 
 
 
@@ -54,6 +61,7 @@ skid all you want idc
 - add sneak check to nametags
 - killfeed script? like in cs (sc6the)
 - multiple targethud's for multiple targets ? (sp3ce)
+- make antibot library use bridges rather than load script...
   
 dont be afraid to use ai:
 “If I have seen further, it is by standing on the shoulders of giants.” -Isaac Newton
