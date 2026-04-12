@@ -54,6 +54,9 @@ skid all you want idc
 - **Detect**
   example usage of the AntiBot library script (that should be a bridge)
 
+- **PartyDodge**
+  automatically leaves a queue if x amount of players join in a party 
+
 
 
 ## Ideas / Todo 
