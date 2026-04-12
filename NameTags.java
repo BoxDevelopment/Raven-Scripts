@@ -1,9 +1,5 @@
-// todo: add sneaking indicator
-
 String[] HEALTH_DISPLAY_MODES = {"Hearts", "Health"};
-Map<Integer, Integer> botFirstSeenTicks = new HashMap<>();
-Map<Integer, Boolean> botEverMovedHoriz = new HashMap<>();
-Map<Integer, Boolean> botAlwaysInvisible = new HashMap<>();
+Map<Integer, Long> botJoinTimesMs = new HashMap<>();
 
 void onLoad() {
     modules.registerSlider("Range", "blocks", 120, 10, 300, 5);
@@ -32,12 +28,10 @@ void onLoad() {
     
     modules.registerDescription("AntiBot");
     modules.registerButton("Ignore Bots", true);
-    modules.registerButton("Bot Check: Invalid UUID", true);
-    modules.registerButton("Bot Check: UUID Stationary Only", true);
-    modules.registerButton("Bot Check: Always Invisible", true);
-    modules.registerButton("Bot Check: Always Stationary", true);
-    modules.registerButton("Bot Check: Entity Age", true);
-    modules.registerSlider("Bot Min Age", "ticks", 20, 0, 200, 1);
+    modules.registerSlider("Bot Check: Delay", "s", -1, -1, 15, 0.5);
+    modules.registerSlider("Bot Check: Pit Spawn", "", -1, -1, 120, 1);
+    modules.registerButton("Bot Check: Tab List", false);
+    modules.registerButton("Bot Check: Print World Join", false);
 
     modules.registerDescription("Friend color");
     modules.registerSlider("Friend R", "", 85, 0, 255, 1);
@@ -59,9 +53,32 @@ void onDisable() {
 }
 
 void clearBotTracking() {
-    botFirstSeenTicks.clear();
-    botEverMovedHoriz.clear();
-    botAlwaysInvisible.clear();
+    botJoinTimesMs.clear();
+}
+
+void onPreUpdate() {
+    pruneDelayTracking();
+}
+
+void onWorldJoin(Entity entity) {
+    if (entity == null) return;
+    if (entity.isUser) {
+        clearBotTracking();
+        return;
+    }
+    if (!entity.isPlayer) return;
+
+    double delaySeconds = modules.getSlider(scriptName, "Bot Check: Delay");
+    if (delaySeconds != -1) {
+        botJoinTimesMs.put(entity.entityId, client.time());
+    }
+
+    if (modules.getButton(scriptName, "Bot Check: Print World Join")) {
+        String display = entity.getDisplayName();
+        if (display == null || display.isEmpty()) display = entity.getName();
+        if (display == null) display = "";
+        client.print("&7Entity &b" + entity.entityId + " &7joined: &r" + display);
+    }
 }
 
 void onRenderTick(float partialTicks) {
@@ -90,12 +107,11 @@ void onRenderTick(float partialTicks) {
     boolean showDurability = modules.getButton(scriptName, "Show Durability");
     boolean showSelf = modules.getButton(scriptName, "Show Yourself");
     boolean ignoreBots = modules.getButton(scriptName, "Ignore Bots");
-    boolean checkInvalidUUID = modules.getButton(scriptName, "Bot Check: Invalid UUID");
-    boolean invalidUUIDStationaryOnly = modules.getButton(scriptName, "Bot Check: UUID Stationary Only");
-    boolean checkAlwaysInvisible = modules.getButton(scriptName, "Bot Check: Always Invisible");
-    boolean checkAlwaysStationary = modules.getButton(scriptName, "Bot Check: Always Stationary");
-    boolean checkEntityAge = modules.getButton(scriptName, "Bot Check: Entity Age");
-    int minEntityAge = (int) modules.getSlider(scriptName, "Bot Min Age");
+    double botDelaySeconds = modules.getSlider(scriptName, "Bot Check: Delay");
+    double pitSpawnY = modules.getSlider(scriptName, "Bot Check: Pit Spawn");
+    boolean checkTabList = modules.getButton(scriptName, "Bot Check: Tab List");
+    HashSet<String> tabListNames = checkTabList ? getTablistNames() : null;
+    boolean hypixelPit = pitSpawnY != -1 && isHypixelPitGame();
 
     int friendColor = toColor(
         (int) modules.getSlider(scriptName, "Friend R"),
@@ -132,7 +148,7 @@ void onRenderTick(float partialTicks) {
         double dist = selfPos.distanceTo(pos);
         if (dist > range) continue;
         
-        if (ignoreBots && isBotEntity(e, checkInvalidUUID, invalidUUIDStationaryOnly, checkAlwaysInvisible, checkAlwaysStationary, checkEntityAge, minEntityAge)) {
+        if (ignoreBots && isBotEntity(e, botDelaySeconds, pitSpawnY, checkTabList, tabListNames, hypixelPit)) {
             continue;
         }
 
@@ -205,11 +221,16 @@ void onRenderTick(float partialTicks) {
         float spaceW = render.getFontWidth(" ") * scale;
         boolean hasHealth = !hpMainPart.isEmpty();
         boolean hasDistance = !distPart.isEmpty();
+        String sneakPart = e.isSneaking() ? " S" : "";
+        boolean hasSneak = !sneakPart.isEmpty();
+        int sneakColor = 0xFFFFFF55;
         float hpMainW = render.getFontWidth(hpMainPart) * scale;
         float hpExtraW = render.getFontWidth(hpExtraPart) * scale;
         float nameW = render.getFontWidth(name) * scale;
+        float sneakW = render.getFontWidth(sneakPart) * scale;
         float distW = render.getFontWidth(distPart) * scale;
         float totalW = nameW
+            + (hasSneak ? sneakW : 0.0f)
             + (hasHealth ? hpMainW + hpExtraW + spaceW : 0.0f)
             + (hasDistance ? spaceW + distW : 0.0f);
         float textH = render.getFontHeight() * scale;
@@ -261,13 +282,19 @@ void onRenderTick(float partialTicks) {
         }
         render.text(name, drawX, y, scale, nameColor, textShadow);
         drawX += nameW;
+        if (hasSneak) {
+            render.text(sneakPart, drawX, y, scale, sneakColor, textShadow);
+            drawX += sneakW;
+        }
         if (hasDistance) {
             drawX += spaceW;
             render.text(distPart, drawX, y, scale, distColor, textShadow);
         }
 
         if (showArmor) {
-            renderArmorLine(e, (float) screenX, y + textH + (3.0f * scale), scale, showEnchants, showDurability, textShadow);
+            float armorIconScale = Math.max(0.55f, Math.min(1.0f, scale * 0.95f));
+            float armorYOffset = (13.0f * armorIconScale) + (3.0f * scale);
+            renderArmorLine(e, (float) screenX, y - armorYOffset, scale, showEnchants, showDurability, textShadow);
         }
     }
     
@@ -484,79 +511,109 @@ int minecraftColor(char code) {
     }
 }
 
-boolean isBotEntity(Entity entity, boolean checkInvalidUUID, boolean invalidUUIDStationaryOnly, boolean checkAlwaysInvisible, boolean checkAlwaysStationary, boolean checkEntityAge, int minEntityAge) {
-    updateBotState(entity);
+boolean isBotEntity(Entity entity, double delaySeconds, double pitSpawnY, boolean checkTabList, HashSet<String> tabListNames, boolean hypixelPit) {
+    if (entity == null || !entity.isPlayer) return true;
+    if (isDelayBot(entity, delaySeconds)) return true;
+    if (entity.isDead()) return true;
 
-    int id = entity.entityId;
-    boolean stationary = !botEverMovedHoriz.getOrDefault(id, false);
-    boolean alwaysInvisible = botAlwaysInvisible.getOrDefault(id, false);
-    int age = Math.max(0, entity.getTicksExisted() - botFirstSeenTicks.getOrDefault(id, entity.getTicksExisted()));
+    String name = entity.getName();
+    if (name == null || name.isEmpty()) return true;
 
-    if (checkInvalidUUID) {
-        String uuid = getEntityUUID(entity);
-        boolean invalidUUID = !isValidUUID(uuid);
-        if (invalidUUID && (!invalidUUIDStationaryOnly || stationary)) {
-            return true;
-        }
+    if (checkTabList && tabListNames != null && !tabListNames.contains(name)) {
+        return true;
     }
 
-    if (checkAlwaysInvisible && alwaysInvisible) return true;
-    if (checkAlwaysStationary && stationary) return true;
-    if (checkEntityAge && age < minEntityAge) return true;
+    String display = entity.getDisplayName();
+    if (entity.getHealth() != 20.0f && ((name != null && name.startsWith("§c")) || (display != null && display.startsWith("§c")))) {
+        return true;
+    }
+
+    if (pitSpawnY != -1 && hypixelPit && isPitSpawnBot(entity, pitSpawnY)) {
+        return true;
+    }
+
+    if (entity.getMaxHurtTime() == 0) {
+        if (display == null) display = "";
+        if (entity.getHealth() == 20.0f) {
+            if (display.length() == 10 && display.charAt(0) != '&') {
+                return true;
+            }
+            if (display.length() == 12 && entity.isSleeping() && display.charAt(0) == '&') {
+                return true;
+            }
+            if (display.length() >= 7 && display.charAt(2) == '[' && display.charAt(3) == 'N' && display.charAt(6) == ']') {
+                return true;
+            }
+            if (name.indexOf(' ') != -1) {
+                return true;
+            }
+        } else if (entity.isInvisible()) {
+            if (display.length() >= 2 && display.charAt(0) == '&' && display.charAt(1) == 'c') {
+                return true;
+            }
+        }
+    }
 
     return false;
 }
 
-void updateBotState(Entity entity) {
-    int id = entity.entityId;
-    if (!botFirstSeenTicks.containsKey(id)) {
-        botFirstSeenTicks.put(id, entity.getTicksExisted());
-        botEverMovedHoriz.put(id, false);
-        botAlwaysInvisible.put(id, entity.isInvisible());
-    } else {
-        boolean wasAlwaysInvisible = botAlwaysInvisible.getOrDefault(id, true);
-        if (wasAlwaysInvisible && !entity.isInvisible()) {
-            botAlwaysInvisible.put(id, false);
-        }
-    }
-
-    Vec3 last = entity.getLastPosition();
-    Vec3 cur = entity.getPosition();
-    if (last != null && cur != null) {
-        double dx = cur.x - last.x;
-        double dz = cur.z - last.z;
-        if (dx * dx + dz * dz > 0.0001) {
-            botEverMovedHoriz.put(id, true);
-        }
-    }
+boolean isDelayBot(Entity entity, double delaySeconds) {
+    if (delaySeconds == -1 || botJoinTimesMs.isEmpty()) return false;
+    Long joinedAt = botJoinTimesMs.get(entity.entityId);
+    if (joinedAt == null) return false;
+    long delayMs = Math.max(0L, (long) Math.round(delaySeconds * 1000.0));
+    return client.time() - joinedAt < delayMs;
 }
 
-String getEntityUUID(Entity entity) {
-    String uuid = entity.getUUID();
-    if (uuid != null && !uuid.isEmpty()) return uuid;
-
-    NetworkPlayer net = entity.getNetworkPlayer();
-    if (net != null) {
-        String netUUID = net.getUUID();
-        if (netUUID != null && !netUUID.isEmpty()) return netUUID;
-    }
-
-    return null;
+void pruneDelayTracking() {
+    if (botJoinTimesMs.isEmpty()) return;
+    double delaySeconds = modules.getSlider(scriptName, "Bot Check: Delay");
+    if (delaySeconds == -1) return;
+    long delayMs = Math.max(0L, (long) Math.round(delaySeconds * 1000.0));
+    long cutoff = client.time() - delayMs;
+    botJoinTimesMs.values().removeIf(seenAt -> seenAt < cutoff);
 }
 
-boolean isValidUUID(String uuid) {
-    if (uuid == null || uuid.isEmpty()) return false;
-    return uuid.matches("^[0-9a-fA-F]{32}$") || uuid.matches("^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$");
+HashSet<String> getTablistNames() {
+    HashSet<String> names = new HashSet<>();
+    List<NetworkPlayer> netPlayers = world.getNetworkPlayers();
+    if (netPlayers == null) return names;
+    for (NetworkPlayer net : netPlayers) {
+        if (net == null) continue;
+        String name = net.getName();
+        if (name != null && !name.isEmpty()) {
+            names.add(name);
+        }
+    }
+    return names;
+}
+
+boolean isHypixelPitGame() {
+    String serverIp = client.getServerIP();
+    if (serverIp == null || serverIp.isEmpty()) return false;
+    if (!serverIp.toLowerCase().contains("hypixel")) return false;
+    List<String> sidebar = world.getScoreboard();
+    if (sidebar == null || sidebar.isEmpty()) return false;
+    String first = util.strip(sidebar.get(0));
+    return first != null && first.toUpperCase().contains("THE HYPIXEL PIT");
+}
+
+boolean isPitSpawnBot(Entity entity, double pitSpawnY) {
+    Vec3 pos = entity.getPosition();
+    if (pos == null) return false;
+    if (pos.y < pitSpawnY || pos.y > 130.0) return false;
+    double dx = pos.x;
+    double dy = pos.y - 114.0;
+    double dz = pos.z;
+    return dx * dx + dy * dy + dz * dz <= 625.0;
 }
 
 void pruneBotTracking(HashSet<Integer> activeIds) {
-    for (Iterator<Map.Entry<Integer, Integer>> it = botFirstSeenTicks.entrySet().iterator(); it.hasNext();) {
-        Map.Entry<Integer, Integer> entry = it.next();
+    for (Iterator<Map.Entry<Integer, Long>> it = botJoinTimesMs.entrySet().iterator(); it.hasNext();) {
+        Map.Entry<Integer, Long> entry = it.next();
         int id = entry.getKey();
         if (!activeIds.contains(id)) {
             it.remove();
-            botEverMovedHoriz.remove(id);
-            botAlwaysInvisible.remove(id);
         }
     }
 }
