@@ -3,15 +3,18 @@ String colorSymbol = util.colorSymbol;
 int status = -1;
 long lastStatusCheck = 0;
 long lastSampleTime = 0;
+long lastLeaveAttempt = 0;
 
 String selfName = "";
 int previousPlayerCount = -1;
 int previousVisibleNameCount = -1;
 boolean dodgedThisQueue = false;
+boolean hasScannedInitialLobby = false;
+boolean pendingLeave = false;
 HashSet<String> previousPlayerIds = new HashSet<>();
 
 void onLoad() {
-    modules.registerDescription("Leaves queue if a suspicious player spike joins (party-safe).");
+    modules.registerDescription("Leaves queue if suspicious players are present on join or join in a spike (party‑safe).");
     modules.registerSlider("Join Threshold", "players", 4, 1, 16, 1);
     modules.registerSlider("Sample Delay", "ms", 250, 50, 1000, 50);
     modules.registerButton("Debug", false);
@@ -32,6 +35,9 @@ void resetQueueTracking() {
     previousPlayerCount = -1;
     previousVisibleNameCount = -1;
     dodgedThisQueue = false;
+    hasScannedInitialLobby = false;
+    pendingLeave = false;
+    lastLeaveAttempt = 0;
     lastSampleTime = 0;
     previousPlayerIds.clear();
 }
@@ -40,6 +46,19 @@ void onPreUpdate() {
     Entity self = client.getPlayer();
     if (self == null) return;
     if (selfName.isEmpty()) selfName = self.getName();
+
+    if (pendingLeave) {
+        long now = client.time();
+        if (now - lastLeaveAttempt >= 250) {
+            client.chat("/l");
+            pendingLeave = false;
+            dodgedThisQueue = true;
+            if (modules.getButton(scriptName, "Debug")) {
+                client.print(colorSymbol + "c[QueueDodge] Left queue after delay.");
+            }
+        }
+        return;
+    }
 
     long now = client.time();
     if (now - lastStatusCheck > 1000) {
@@ -58,8 +77,29 @@ void onPreUpdate() {
 
     HashMap<String, Map<String, String>> queueEntries = getQueueEntries();
     if (queueEntries == null) return;
+
     int playerCount = queueEntries.size();
     int visibleNameCount = countVisibleEntries(queueEntries);
+
+    if (!hasScannedInitialLobby) {
+        int threshold = (int) modules.getSlider(scriptName, "Join Threshold");
+        int nonPartyInitial = playerCount - visibleNameCount;
+
+        if (nonPartyInitial >= threshold) {
+            lastLeaveAttempt = client.time();
+            pendingLeave = true;
+            client.print(colorSymbol + "c[QueueDodge] " + nonPartyInitial + " players on join");
+            if (modules.getButton(scriptName, "Debug")) {
+                client.print(colorSymbol + "7[QueueDodge] Non-party players in lobby: " + nonPartyInitial);
+            }
+        }
+        hasScannedInitialLobby = true;
+        previousPlayerCount = playerCount;
+        previousVisibleNameCount = visibleNameCount;
+        previousPlayerIds.clear();
+        previousPlayerIds.addAll(queueEntries.keySet());
+        return;
+    }
 
     if (previousPlayerCount == -1) {
         previousPlayerCount = playerCount;
@@ -76,19 +116,19 @@ void onPreUpdate() {
     int totalDelta = playerCount - previousPlayerCount;
     int visibleDelta = visibleNameCount - previousVisibleNameCount;
 
-    if (!dodgedThisQueue && totalDelta > 0) {
+    if (!dodgedThisQueue && !pendingLeave && totalDelta > 0) {
         int threshold = (int) modules.getSlider(scriptName, "Join Threshold");
-
         int nonPartyDelta = totalDelta - Math.max(0, visibleDelta);
 
         if (nonPartyDelta >= threshold) {
-            client.chat("/l");
-            dodgedThisQueue = true;
+            lastLeaveAttempt = client.time();
+            pendingLeave = true;
+            client.print(colorSymbol + "c[QueueDodge] " + nonPartyDelta + " layers joined! Leaving queue...");
             if (modules.getButton(scriptName, "Debug")) {
-                client.print(colorSymbol + "c[PartyDodge] Left queue. Non-party spike: " + nonPartyDelta + " (raw: " + totalDelta + ")");
+                client.print(colorSymbol + "7[QueueDodge] Non-party spike: " + nonPartyDelta + " (raw: " + totalDelta + ")");
             }
         } else if (modules.getButton(scriptName, "Debug") && totalDelta >= threshold) {
-            client.print(colorSymbol + "e[PartyDodge] Ignored spike (likely party). Raw: " + totalDelta + ", visible: +" + Math.max(0, visibleDelta));
+            client.print(colorSymbol + "e[QueueDodge] Ignored spike (likely party). Raw: " + totalDelta + ", visible: +" + Math.max(0, visibleDelta));
         }
     }
 
@@ -142,7 +182,7 @@ void printJoinDebug(HashMap<String, Map<String, String>> queueEntries) {
         String clean = util.strip(display);
 
         client.print(
-            colorSymbol + "7[PartyDodge] Join " +
+            colorSymbol + "7[QueueDodge] Join " +
             (obf ? colorSymbol + "c[OBF]" : colorSymbol + "a[VISIBLE]") +
             colorSymbol + "7 name=" + colorSymbol + "f" + name +
             colorSymbol + "7 display=" + display +
