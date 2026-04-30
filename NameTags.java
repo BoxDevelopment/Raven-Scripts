@@ -1,4 +1,5 @@
 String[] HEALTH_DISPLAY_MODES = {"Hearts", "Health"};
+String[] HEART_SYMBOL_MODES = {"h", "\u2665", "\u2764"};
 Map<Integer, Long> botJoinTimesMs = new HashMap<>();
 
 void onLoad() {
@@ -18,6 +19,7 @@ void onLoad() {
     modules.registerButton("Show Health", true);
     modules.registerSlider("Health display", "", 0, HEALTH_DISPLAY_MODES);
     modules.registerButton("Show Heart Symbol", true);
+    modules.registerSlider("Heart Symbol", "", 0, HEART_SYMBOL_MODES);
     modules.registerButton("Show Distance", true);
 
     modules.registerButton("Show Invis", true);
@@ -100,6 +102,7 @@ void onRenderTick(float partialTicks) {
     boolean showHealth = modules.getButton(scriptName, "Show Health");
     boolean heartsMode = ((int) modules.getSlider(scriptName, "Health display")) == 0;
     boolean showHeartSymbol = modules.getButton(scriptName, "Show Heart Symbol");
+    int heartSymbolMode = (int) modules.getSlider(scriptName, "Heart Symbol");
     boolean showDistance = modules.getButton(scriptName, "Show Distance");
     boolean showInvis = modules.getButton(scriptName, "Show Invis");
     boolean showArmor = modules.getButton(scriptName, "Show Armor");
@@ -198,6 +201,7 @@ void onRenderTick(float partialTicks) {
         String hpExtraPart = "";
         int hpColor = 0xFFFFFFFF;
         int hpExtraColor = 0xFFFFAA00;
+        String heartSuffix = showHeartSymbol ? getHeartSymbol(heartSymbolMode) : "";
         if (showHealth) {
             float hp = Math.max(0.0f, e.getHealth());
             float absorption = Math.max(0.0f, e.getAbsorption());
@@ -207,13 +211,13 @@ void onRenderTick(float partialTicks) {
 
             float displayMain = heartsMode ? mainHp / 2.0f : mainHp;
             hpMainPart = fastOneDecimal(displayMain);
-            if (heartsMode && showHeartSymbol) hpMainPart += "h";
+            if (!heartSuffix.isEmpty()) hpMainPart += heartSuffix;
 
             if (totalHp > 20.0f) {
                 float extra = totalHp - 20.0f;
                 float extraDisplay = heartsMode ? extra / 2.0f : extra;
                 hpExtraPart = "+" + fastOneDecimal(extraDisplay);
-                if (heartsMode && showHeartSymbol) hpExtraPart += "h";
+                if (!heartSuffix.isEmpty()) hpExtraPart += heartSuffix;
             }
         }
 
@@ -627,6 +631,12 @@ String fastOneDecimal(float value) {
     int intPart = tenths / 10;
     int fracPart = Math.abs(tenths % 10);
     return intPart + "." + fracPart;
+}
+
+String getHeartSymbol(int mode) {
+    if (mode == 1) return "\u2665";
+    if (mode == 2) return "\u2764";
+    return "h";
 }
 
 int toColor(int r, int g, int b, int a) {
