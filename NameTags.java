@@ -48,6 +48,8 @@ void onLoad() {
 
 void onEnable() {
     clearBotTracking();
+    modules.setSlider("Nametags", "Scale", -1);
+    modules.setButton("Nametags", "Show armor", false);
 }
 
 void onDisable() {
